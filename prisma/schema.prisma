@@ -1,0 +1,285 @@
+// Stylo — Esquema de datos (multi-tenant)
+// Convenciones:
+//  - Todos los montos se almacenan en centavos (priceCents / priceCents).
+//  - Todas las fechas se guardan como UTC (DateTime). La zona horaria del negocio
+//    se usa solo para presentación y cálculo de disponibilidad.
+//  - Toda entidad de negocio se relaciona con Business (businessId). El tenant
+//    siempre se determina en el servidor desde el usuario autenticado.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  OWNER
+  PROFESSIONAL
+}
+
+enum WeekDay {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum ReminderStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum ReminderChannel {
+  EMAIL
+  WHATSAPP
+}
+
+enum SubscriptionStatus {
+  PENDING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+}
+
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique
+  email     String   @unique
+  firstName String?
+  lastName  String?
+  phone     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships          BusinessMember[]
+  customerProfiles     Customer[]
+  professionalProfiles Professional[]
+}
+
+model Business {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  address     String?
+  phone       String?
+  email       String?
+  // Zona horaria del negocio (IANA, ej: "America/Argentina/Buenos_Aires")
+  timezone    String   @default("UTC")
+  logoUrl     String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members       BusinessMember[]
+  professionals Professional[]
+  customers     Customer[]
+  services      Service[]
+  businessHours BusinessHours[]
+  appointments  Appointment[]
+  subscriptions Subscription[]
+  reminders     Reminder[]
+}
+
+// Acceso al dashboard de un negocio (tenant). Un usuario puede pertenecer
+// a varios negocios con distintos roles.
+model BusinessMember {
+  id         String   @id @default(cuid())
+  businessId String
+  userId     String
+  role       Role     @default(OWNER)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, userId])
+  @@index([userId])
+}
+
+// Prestador de servicios dentro de un negocio. Puede estar asociado a un
+// User (si tiene cuenta) o ser gestionado íntegramente por el OWNER.
+model Professional {
+  id         String   @id @default(cuid())
+  businessId String
+  userId     String?
+  name       String
+  email      String?
+  phone      String?
+  bio        String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business      Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user          User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  services      Service[]      @relation("ProfessionalServices")
+  businessHours BusinessHours[]
+  appointments  Appointment[]
+
+  @@unique([businessId, userId])
+  @@index([businessId])
+  @@index([userId])
+}
+
+model Service {
+  id              String   @id @default(cuid())
+  businessId      String
+  name            String
+  description     String?
+  durationMinutes Int
+  priceCents      Int
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  business     Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  professionals Professional[] @relation("ProfessionalServices")
+  appointments  Appointment[]
+
+  @@index([businessId])
+}
+
+// Horarios laborales. professionalId NULL = rige para todo el negocio.
+// startTime/endTime en formato "HH:MM" (24h) en la zona horaria del negocio.
+model BusinessHours {
+  id             String   @id @default(cuid())
+  businessId     String
+  professionalId String?
+  dayOfWeek      WeekDay
+  startTime      String
+  endTime        String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  professional Professional? @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, dayOfWeek])
+  @@index([professionalId, dayOfWeek])
+}
+
+model Customer {
+  id         String   @id @default(cuid())
+  businessId String
+  userId     String?
+  name       String
+  email      String?
+  phone      String?
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  appointments Appointment[]
+  reminders    Reminder[]
+
+  @@unique([businessId, userId])
+  @@index([businessId])
+  @@index([userId])
+}
+
+model Appointment {
+  id             String            @id @default(cuid())
+  businessId     String
+  professionalId String
+  serviceId      String
+  customerId     String
+  startsAt       DateTime
+  endsAt         DateTime
+  status         AppointmentStatus @default(PENDING)
+  // Precio del servicio al momento de la reserva (snapshot, en centavos)
+  priceCents     Int
+  notes          String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  professional Professional @relation(fields: [professionalId], references: [id], onDelete: Restrict)
+  service      Service      @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  customer     Customer     @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  reminders    Reminder[]
+
+  @@index([businessId, startsAt])
+  @@index([professionalId, startsAt])
+  @@index([customerId, startsAt])
+  @@index([status, startsAt])
+}
+
+// Plan de suscripción (global, gestionado por la plataforma).
+model Plan {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  priceCents  Int
+  // Límites del plan (ej: {"maxProfessionals": 5, "maxAppointmentsPerDay": 50})
+  limits      Json?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id                        String             @id @default(cuid())
+  businessId                String
+  planId                    String
+  status                    SubscriptionStatus @default(PENDING)
+  mercadoPagoSubscriptionId String?
+  currentPeriodStart        DateTime?
+  currentPeriodEnd          DateTime?
+  canceledAt                DateTime?
+  createdAt                 DateTime           @default(now())
+  updatedAt                 DateTime           @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  plan     Plan     @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  @@index([businessId])
+  @@index([planId])
+}
+
+model Reminder {
+  id            String          @id @default(cuid())
+  businessId    String
+  appointmentId String
+  customerId    String
+  channel       ReminderChannel @default(EMAIL)
+  status        ReminderStatus  @default(PENDING)
+  scheduledAt   DateTime
+  sentAt        DateTime?
+  failedAt      DateTime?
+  error         String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  business    Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  customer    Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Idempotencia: no programar el mismo recordatorio dos veces
+  @@unique([appointmentId, channel, scheduledAt])
+  @@index([businessId])
+  @@index([status, scheduledAt])
+  @@index([customerId])
+}
