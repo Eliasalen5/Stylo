@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { normalizeSlug, isSlugAvailable, isValidTimeZone } from "@/lib/business";
+import { normalizeTimeZone } from "@/lib/timezones";
 
 export type CreateBusinessState = {
   error?: string;
@@ -59,6 +60,8 @@ export async function createBusiness(
     return { fieldErrors };
   }
 
+  const storedTimezone = normalizeTimeZone(timezone);
+
   try {
     // Nested create: crea Business + BusinessMember (OWNER) en una sola
     // operación atómica. El usuario proviene de la sesión autenticada.
@@ -74,7 +77,7 @@ export async function createBusiness(
                 slug: slug!,
                 description,
                 phone,
-                timezone,
+                timezone: storedTimezone,
               },
             },
           },

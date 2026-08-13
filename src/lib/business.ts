@@ -1,5 +1,7 @@
 import { db } from "@/lib/db";
 
+export { isValidTimeZone, normalizeTimeZone } from "@/lib/timezones";
+
 /**
  * Valida el slug de un negocio. Formato: minúsculas, números y guiones,
  * sin guiones al inicio/final ni consecutivos. Devuelve el slug normalizado
@@ -31,15 +33,4 @@ export async function isSlugAvailable(slug: string): Promise<boolean> {
   });
 
   return existing === null;
-}
-
-const IANA_TIMEZONES = new Set(
-  Intl.supportedValuesOf("timeZone") as readonly string[]
-);
-
-/**
- * Valida que la zona horaria sea un IANA válido (ej: "America/Argentina/Buenos_Aires").
- */
-export function isValidTimeZone(timezone: string): boolean {
-  return IANA_TIMEZONES.has(timezone);
 }
